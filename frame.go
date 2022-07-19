@@ -350,6 +350,8 @@ func (f *Frame) Bytes() []byte {
 
 	for l := 0; l < 192; l++ {
 		res = f.LayerPutLine(l, res, true)
+	}
+	for l := 0; l < 192; l++ {
 		res = f.LayerPutLine(l, res, false)
 	}
 
@@ -368,7 +370,7 @@ func (f *Frame) LayerPutLine(y int, list []byte, layer1 bool) []byte {
 
 	if compr == 1 {
 		chks := make([]byte, 0)
-		flag := 0
+		flag := uint32(0)
 
 		for i := 0; i < 32; i++ {
 			chunk := byte(0)
@@ -379,7 +381,7 @@ func (f *Frame) LayerPutLine(y int, list []byte, layer1 bool) []byte {
 			}
 
 			if chunk != 0x00 {
-				flag |= 1 << (31 - i)
+				flag |= uint32(1) << (31 - i)
 				chks = append(chks, chunk)
 			}
 		}

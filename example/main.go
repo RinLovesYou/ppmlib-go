@@ -129,4 +129,6 @@ func main() {
 
 	elapsed := time.Since(now)
 	fmt.Printf("parsing & encoding %s took %.1fs!\n", name, elapsed.Seconds())
+
+	ppm.Save("copy.ppm")
 }

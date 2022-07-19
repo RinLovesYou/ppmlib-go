@@ -524,7 +524,7 @@ func CreateFile(author *Author, frames []*Frame, audio []byte) (*PPMFile, error)
 	return file, nil
 }
 
-var magic = []byte{'P', 'A', 'R', 'A'}
+var magic = []uint8{'P', 'A', 'R', 'A'}
 
 func (f *PPMFile) Save(path string) error {
 
@@ -539,7 +539,7 @@ func (f *PPMFile) Save(path string) error {
 	binary.Write(file, binary.LittleEndian, f.AnimationDataSize)
 	binary.Write(file, binary.LittleEndian, f.SoundDataSize)
 	binary.Write(file, binary.LittleEndian, f.FrameCount)
-	binary.Write(file, binary.LittleEndian, uint16(0x0024))
+	binary.Write(file, binary.LittleEndian, uint16(0x24))
 	if f.Locked {
 		binary.Write(file, binary.LittleEndian, uint16(1))
 	} else {
@@ -559,13 +559,13 @@ func (f *PPMFile) Save(path string) error {
 	currentAuthor, _ := syscall.UTF16FromString(string(goCurrentAuthor))
 
 	for len(rootAuthor) != 11 {
-		rootAuthor = append(rootAuthor, 0)
+		rootAuthor = append(rootAuthor, '\000')
 	}
 	for len(parentAuthor) != 11 {
-		parentAuthor = append(parentAuthor, 0)
+		parentAuthor = append(parentAuthor, '\000')
 	}
 	for len(currentAuthor) != 11 {
-		currentAuthor = append(currentAuthor, 0)
+		currentAuthor = append(currentAuthor, '\000')
 	}
 	binary.Write(file, binary.LittleEndian, rootAuthor)
 	binary.Write(file, binary.LittleEndian, parentAuthor)
@@ -602,34 +602,31 @@ func (f *PPMFile) Save(path string) error {
 		binary.Write(file, binary.LittleEndian, lst[i])
 	}
 
-	pos, err := file.Seek(0, io.SeekCurrent)
-	if err != nil {
-		return err
+	for pos, _ := file.Seek(0, io.SeekCurrent); (4-pos%4)%4 != 0; pos, _ = file.Seek(0, io.SeekCurrent) {
+		binary.Write(file, binary.LittleEndian, byte(0x00))
 	}
-
-	binary.Write(file, binary.LittleEndian, make([]byte, (4-pos%4)%4))
 
 	for i := 0; i < len(f.Frames); i++ {
 		binary.Write(file, binary.LittleEndian, byte(0))
 	}
 
-	pos, err = file.Seek(0, os.SEEK_CUR)
-	if err != nil {
-		return err
+	for pos, _ := file.Seek(0, io.SeekCurrent); (4-pos%4)%4 != 0; pos, _ = file.Seek(0, io.SeekCurrent) {
+		binary.Write(file, binary.LittleEndian, byte(0x00))
 	}
 
-	binary.Write(file, binary.LittleEndian, make([]byte, (4-pos%4)%4))
-
 	binary.Write(file, binary.LittleEndian, uint32(len(f.Audio.Data.RawBGM)))
-	binary.Write(file, binary.LittleEndian, uint32(0)) //SE1
-	binary.Write(file, binary.LittleEndian, uint32(0)) //SE2
-	binary.Write(file, binary.LittleEndian, uint32(0)) //SE3
+	binary.Write(file, binary.LittleEndian, uint32(len(f.Audio.Data.RawSE1))) //SE1
+	binary.Write(file, binary.LittleEndian, uint32(len(f.Audio.Data.RawSE2))) //SE2
+	binary.Write(file, binary.LittleEndian, uint32(len(f.Audio.Data.RawSE3))) //SE3
 
 	binary.Write(file, binary.LittleEndian, f.Audio.Header.CurrentFrameSpeed)
 	binary.Write(file, binary.LittleEndian, f.Audio.Header.RecordingBGMFrameSpeed)
 	binary.Write(file, binary.LittleEndian, make([]byte, 14))
 
 	binary.Write(file, binary.LittleEndian, f.Audio.Data.RawBGM)
+	binary.Write(file, binary.LittleEndian, f.Audio.Data.RawSE1)
+	binary.Write(file, binary.LittleEndian, f.Audio.Data.RawSE2)
+	binary.Write(file, binary.LittleEndian, f.Audio.Data.RawSE3)
 
 	binary.Write(file, binary.LittleEndian, make([]byte, 0x80))
 	binary.Write(file, binary.LittleEndian, make([]byte, 0x10))
