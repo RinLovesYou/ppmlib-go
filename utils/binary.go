@@ -91,3 +91,21 @@ func (m *MyWriter) Seek(offset int64, whence int) (int64, error) {
 	m.pos = newPos
 	return int64(newPos), nil
 }
+
+//generic function that splits an array into multiple subarrays. eg 2, where the amount of items is divided by 2
+//4, where the amount of items is devided by 4, etc. returns an array of arrays.
+func Split[T any](array []T, amountOfArrays int) [][]T {
+	if amountOfArrays%2 != 0 {
+		amountOfArrays++
+	}
+
+	var result [][]T
+	originalLength := len(array)
+	amountToTake := originalLength / amountOfArrays
+	for i := 0; i < amountOfArrays; i++ {
+		result = append(result, Take(array, amountToTake))
+		array = array[amountToTake:]
+	}
+
+	return result
+}

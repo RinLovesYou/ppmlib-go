@@ -1,3 +1,7 @@
 /encoder
 /go.sum
 /input
+*.mp4
+*.ppm
+*.pem
+*.gif

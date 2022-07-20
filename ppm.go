@@ -2,6 +2,10 @@ package ppmlib
 
 import (
 	"bytes"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha1"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -48,6 +52,8 @@ type PPMFile struct {
 	BGMRate          float32
 	SoundEffectFlags []byte
 	Signature        []byte
+
+	Key *rsa.PrivateKey
 }
 
 func ReadFile(path string) (*PPMFile, error) {
@@ -628,7 +634,26 @@ func (f *PPMFile) Save(path string) error {
 	binary.Write(file, binary.LittleEndian, f.Audio.Data.RawSE2)
 	binary.Write(file, binary.LittleEndian, f.Audio.Data.RawSE3)
 
-	binary.Write(file, binary.LittleEndian, make([]byte, 0x80))
+	pos, err := file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return err
+	}
+
+	stats, err := file.Stat()
+	if err != nil {
+		return err
+	}
+
+	streamSize := stats.Size()
+
+	file.Seek(0, io.SeekStart)
+	toHash := make([]byte, streamSize)
+	file.Read(toHash)
+	file.Seek(pos, io.SeekStart)
+
+	f.setSignature(toHash)
+
+	binary.Write(file, binary.LittleEndian, f.Signature)
 	binary.Write(file, binary.LittleEndian, make([]byte, 0x10))
 
 	return nil
@@ -644,4 +669,19 @@ var ppmFramerates = map[byte]float32{
 	6: 12.0,
 	7: 20.0,
 	8: 30.0,
+}
+
+func (f *PPMFile) setSignature(data []byte) {
+	if f.Key == nil {
+		f.Signature = make([]byte, 0x80)
+		return
+	}
+
+	hashed := sha1.Sum(data)
+	data, err := rsa.SignPKCS1v15(rand.Reader, f.Key, crypto.SHA1, hashed[:])
+	if err != nil {
+		return
+	}
+
+	f.Signature = data
 }
