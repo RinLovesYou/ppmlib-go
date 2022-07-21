@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/RinLovesYou/ppmlib-go"
 	"github.com/Clinet/ffgoconv"
+	"github.com/RinLovesYou/ppmlib-go"
 )
 
 func main() {
@@ -68,10 +68,14 @@ func main() {
 
 	timeMP4 := time.Now()
 	ffmpeg, err := ffgoconv.NewFFmpeg(name, []string{"-hide_banner", "-stats",
+		"-r", fmt.Sprintf("%.1f", ppm.Framerate),
 		"-hwaccel", "auto",
-		"-i", nameGIF, "-r", fmt.Sprintf("%.1f", ppm.Framerate),
+		"-i", nameGIF,
 		"-i", nameWAV,
-		nameMP4, "-pix_fmt", "yuv420p", "-c:v", "libx264", "-c:a", "aac",
+		nameMP4,
+		"-pix_fmt", "yuv420p",
+		"-c:v", "libx264",
+		"-c:a", "aac",
 		"-threads", "0",
 	})
 	if err != nil {

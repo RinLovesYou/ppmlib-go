@@ -201,7 +201,7 @@ func Parse(data []byte) (*PPMFile, error) {
 	buffer.SeekByte(0x10, true)
 
 	if buffer.ByteOffset() < buffer.ByteCapacity() {
-		return nil, errors.New(fmt.Sprintf("unexpected data (%d) after signature", buffer.ByteCapacity() - buffer.ByteOffset()))
+		return nil, errors.New(fmt.Sprintf("unexpected data (%d) after signature", buffer.ByteCapacity()-buffer.ByteOffset()))
 	}
 
 	for {
@@ -220,10 +220,10 @@ func (file *PPMFile) ParseFrame(frame uint16, data []byte) {
 
 func (file *PPMFile) ParseFrames(data []byte, offsets []uint32) {
 	perGor := uint16(100)
-	for i := uint16(0); i < uint16(len(offsets)); i+= perGor {
+	for i := uint16(0); i < uint16(len(offsets)); i += perGor {
 		go func(i uint16) {
 			for j := uint16(0); j < perGor; j++ {
-				frame := i+j
+				frame := i + j
 				if frame >= uint16(len(offsets)) {
 					break
 				}
@@ -233,6 +233,7 @@ func (file *PPMFile) ParseFrames(data []byte, offsets []uint32) {
 				file.ParseFrame(frame, data[frameOffset:frameEndset])
 			}
 		}(i)
+		time.Sleep(time.Millisecond * 3)
 	}
 
 	for {
