@@ -5,3 +5,6 @@
 *.ppm
 *.pem
 *.gif
+*.wav
+*.exe
+example/example

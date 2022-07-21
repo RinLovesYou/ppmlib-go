@@ -1,7 +1,6 @@
 package ppmlib
 
 import (
-	"bytes"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -13,10 +12,10 @@ import (
 	"os"
 	"runtime"
 	"strconv"
-	"syscall"
 	"time"
 
 	"github.com/RinLovesYou/ppmlib-go/utils"
+	crunch "github.com/superwhiskers/crunch/v3"
 )
 
 type PPMFile struct {
@@ -34,15 +33,16 @@ type PPMFile struct {
 	ParentAuthor  *Author
 	CurrentAuthor *Author
 
-	RootFileFragment [8]byte
+	RootFileFragment []byte //len: 8
 
 	Timestamp *Timestamp
 
-	Thumbnail [1536]byte `json:"-"`
+	Thumbnail []byte `json:"-"` //len: 1536
 
 	FrameOffsetTableSize uint16
 
-	Frames []*Frame `json:"-"`
+	Frames       []*Frame `json:"-"`
+	FramesParsed uint16
 
 	AnimationFlags uint16
 
@@ -71,13 +71,10 @@ func ReadFile(path string) (*PPMFile, error) {
 }
 
 func Parse(data []byte) (*PPMFile, error) {
-	buffer := bytes.NewReader(data)
+	buffer := crunch.NewBuffer(data)
+	var err error
 
-	magic := make([]byte, 4)
-	_, err := buffer.Read(magic)
-	if err != nil {
-		return nil, err
-	}
+	magic := buffer.ReadBytesNext(4)
 
 	if string(magic) != "PARA" {
 		return nil, errors.New("invalid file magic")
@@ -85,97 +82,37 @@ func Parse(data []byte) (*PPMFile, error) {
 
 	file := &PPMFile{}
 
-	err = binary.Read(buffer, binary.LittleEndian, &file.AnimationDataSize)
-	if err != nil {
-		return nil, err
-	}
-
-	err = binary.Read(buffer, binary.LittleEndian, &file.SoundDataSize)
-	if err != nil {
-		return nil, err
-	}
-
-	err = binary.Read(buffer, binary.LittleEndian, &file.FrameCount)
-	if err != nil {
-		return nil, err
-	}
+	file.AnimationDataSize = buffer.ReadU32LENext(1)[0]
+	file.SoundDataSize = buffer.ReadU32LENext(1)[0]
+	file.FrameCount = buffer.ReadU16LENext(1)[0]
 
 	file.FrameCount++
+	file.Frames = make([]*Frame, file.FrameCount)
 
-	err = binary.Read(buffer, binary.LittleEndian, &file.FormatVersion)
-	if err != nil {
-		return nil, err
-	}
+	file.FormatVersion = buffer.ReadU16LENext(1)[0]
 
-	var isLocked uint16
-	err = binary.Read(buffer, binary.LittleEndian, &isLocked)
-	if err != nil {
-		return nil, err
-	}
-
+	isLocked := buffer.ReadU16LENext(1)[0]
 	file.Locked = isLocked != 0
 
-	err = binary.Read(buffer, binary.LittleEndian, &file.ThumbnailFrameIndex)
+	file.ThumbnailFrameIndex = buffer.ReadU16LENext(1)[0]
+	rootName := utils.ReadUTF16String(buffer.ReadBytesNext(22))
+	parentName := utils.ReadUTF16String(buffer.ReadBytesNext(22))
+	currentName := utils.ReadUTF16String(buffer.ReadBytesNext(22))
+
+	parentId := buffer.ReadU64LENext(1)[0]
+	currentId := buffer.ReadU64LENext(1)[0]
+
+	file.ParentFilename, err = FilenameFrom(buffer.ReadBytesNext(18))
 	if err != nil {
 		return nil, err
 	}
 
-	rootName, err := utils.ReadWChars(buffer, 11)
+	file.CurrentFilename, err = FilenameFrom(buffer.ReadBytesNext(18))
 	if err != nil {
 		return nil, err
 	}
 
-	parentName, err := utils.ReadWChars(buffer, 11)
-	if err != nil {
-		return nil, err
-	}
-
-	currentName, err := utils.ReadWChars(buffer, 11)
-	if err != nil {
-		return nil, err
-	}
-
-	var parentId uint64
-	var currentId uint64
-
-	err = binary.Read(buffer, binary.LittleEndian, &parentId)
-	if err != nil {
-		return nil, err
-	}
-
-	err = binary.Read(buffer, binary.LittleEndian, &currentId)
-	if err != nil {
-		return nil, err
-	}
-
-	parentNameBuffer := make([]byte, 18)
-	currentNameBuffer := make([]byte, 18)
-
-	_, err = buffer.Read(parentNameBuffer)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = buffer.Read(currentNameBuffer)
-	if err != nil {
-		return nil, err
-	}
-
-	file.ParentFilename, err = FilenameFrom(parentNameBuffer)
-	if err != nil {
-		return nil, err
-	}
-
-	file.CurrentFilename, err = FilenameFrom(currentNameBuffer)
-	if err != nil {
-		return nil, err
-	}
-
-	var rootId uint64
-	err = binary.Read(buffer, binary.LittleEndian, &rootId)
-	if err != nil {
-		return nil, err
-	}
+	rootId := buffer.ReadU64LENext(1)[0]
 
 	file.RootAuthor, err = NewAuthor(rootName, rootId)
 	if err != nil {
@@ -192,149 +129,51 @@ func Parse(data []byte) (*PPMFile, error) {
 		return nil, err
 	}
 
-	fragment := make([]byte, 8)
-	_, err = buffer.Read(fragment)
-	if err != nil {
-		return nil, err
-	}
+	file.RootFileFragment = buffer.ReadBytesNext(8)
 
-	copy(file.RootFileFragment[:], fragment)
+	file.Timestamp = NewTimestamp(buffer.ReadU32LENext(1)[0])
 
-	var timestamp uint32
-	err = binary.Read(buffer, binary.LittleEndian, &timestamp)
-	if err != nil {
-		return nil, err
-	}
+	buffer.SeekByte(2, true)
 
-	file.Timestamp = NewTimestamp(timestamp)
+	file.Thumbnail = buffer.ReadBytesNext(1536)
 
-	var blank uint16
-	err = binary.Read(buffer, binary.LittleEndian, &blank) //0x9E
-	if err != nil {
-		return nil, err
-	}
+	buffer.SeekByte(0x06A0, false)
+	file.FrameOffsetTableSize = buffer.ReadU16LENext(1)[0]
 
-	thumbnail := make([]byte, 1536)
-	_, err = buffer.Read(thumbnail)
-	if err != nil {
-		return nil, err
-	}
+	buffer.SeekByte(4, true)
 
-	copy(file.Thumbnail[:], thumbnail)
-
-	err = binary.Read(buffer, binary.LittleEndian, &file.FrameOffsetTableSize)
-	if err != nil {
-		return nil, err
-	}
-
-	var blank2 uint32
-	err = binary.Read(buffer, binary.LittleEndian, &blank2) //0x6A2 - always 0
-	if err != nil {
-		return nil, err
-	}
-
-	err = binary.Read(buffer, binary.LittleEndian, &file.AnimationFlags)
-	if err != nil {
-		return nil, err
-	}
+	file.AnimationFlags = buffer.ReadU16LENext(1)[0]
 
 	oCnt := file.FrameOffsetTableSize/4 - 1
+	animationOffsets := buffer.ReadU32LENext(int64(oCnt + 1))
 
-	animationOffset := make([]uint32, int(oCnt)+1)
-
-	file.Frames = make([]*Frame, file.FrameCount)
-
-	for i := 0; i <= int(oCnt); i++ {
-		var offset uint32
-		err = binary.Read(buffer, binary.LittleEndian, &offset)
-		if err != nil {
-			return nil, err
-		}
-
-		animationOffset[i] = offset
-	}
-
-	//calculate the current position of the buffer
-	currentPosition, err := buffer.Seek(0, io.SeekCurrent)
-	if err != nil {
-		return nil, err
-	}
-
-	offset := currentPosition
-
-	for i := 0; i <= int(oCnt); i++ {
-		if offset+int64(animationOffset[i]) == 4288480943 {
-			return nil, errors.New("data might be corrupted (possible memory pit?)")
-		}
-
-		buffer.Seek(offset+int64(animationOffset[i]), io.SeekStart)
-		file.Frames[i], err = ReadFrame(buffer)
-		if err != nil {
-			return nil, err
-		}
-
-		file.Frames[i].AnimationIndex = utils.IndexOf(animationOffset, animationOffset[i])
-		if i > 0 {
-			file.Frames[i].Overwrite(file.Frames[i-1])
-		}
-	}
+	go file.ParseFrames(data, animationOffsets)
 
 	if file.SoundDataSize == 0 {
 		return file, nil
 	}
 
-	offset = 0x6A0 + int64(file.AnimationDataSize)
-	buffer.Seek(offset, io.SeekStart)
+	offset := 0x6A0 + int64(file.AnimationDataSize)
+	buffer.SeekByte(offset, false)
 
-	file.SoundEffectFlags = make([]byte, len(file.Frames))
+	file.SoundEffectFlags = buffer.ReadBytesNext(int64(len(file.Frames)))
 
 	file.Audio = NewAudio()
-	for i := 0; i < len(file.Frames); i++ {
-		file.SoundEffectFlags[i], err = buffer.ReadByte()
-		if err != nil {
-			return nil, err
-		}
-	}
+
 	offset += int64(len(file.Frames))
 
-	align := make([]byte, ((4 - offset%4) % 4))
 	//makes the next offset divisible by 4.
-	err = binary.Read(buffer, binary.LittleEndian, align)
-	if err != nil {
-		return nil, err
-	}
+	buffer.SeekByte(((4 - offset%4) % 4), true)
 
-	err = binary.Read(buffer, binary.LittleEndian, &file.Audio.Header.BGMTrackSize)
-	if err != nil {
-		return nil, err
-	}
-
-	err = binary.Read(buffer, binary.LittleEndian, &file.Audio.Header.SE1TrackSize)
-	if err != nil {
-		return nil, err
-	}
-
-	err = binary.Read(buffer, binary.LittleEndian, &file.Audio.Header.SE2TrackSize)
-	if err != nil {
-		return nil, err
-	}
-
-	err = binary.Read(buffer, binary.LittleEndian, &file.Audio.Header.SE3TrackSize)
-	if err != nil {
-		return nil, err
-	}
-
-	currentFrameSpeed, err := buffer.ReadByte()
-	if err != nil {
-		return nil, err
-	}
+	file.Audio.Header.BGMTrackSize = buffer.ReadU32LENext(1)[0]
+	file.Audio.Header.SE1TrackSize = buffer.ReadU32LENext(1)[0]
+	file.Audio.Header.SE2TrackSize = buffer.ReadU32LENext(1)[0]
+	file.Audio.Header.SE3TrackSize = buffer.ReadU32LENext(1)[0]
+	currentFrameSpeed := buffer.ReadByteNext()
 
 	file.Audio.Header.CurrentFrameSpeed = byte(8) - currentFrameSpeed
 
-	recordingBGMFrameSpeed, err := buffer.ReadByte()
-	if err != nil {
-		return nil, err
-	}
+	recordingBGMFrameSpeed := buffer.ReadByteNext()
 
 	file.Audio.Header.RecordingBGMFrameSpeed = byte(8) - recordingBGMFrameSpeed
 
@@ -346,63 +185,65 @@ func Parse(data []byte) (*PPMFile, error) {
 		file.BGMRate = val
 	}
 
-	_, err = buffer.Read(make([]byte, 14))
-	if err != nil {
-		return nil, err
-	}
+	buffer.SeekByte(14, true)
 
-	file.Audio.Data.RawBGM = make([]byte, file.Audio.Header.BGMTrackSize)
-	file.Audio.Data.RawSE1 = make([]byte, file.Audio.Header.SE1TrackSize)
-	file.Audio.Data.RawSE2 = make([]byte, file.Audio.Header.SE2TrackSize)
-	file.Audio.Data.RawSE3 = make([]byte, file.Audio.Header.SE3TrackSize)
+	file.Audio.Data.RawBGM = buffer.ReadBytesNext(int64(file.Audio.Header.BGMTrackSize))
+	file.Audio.Data.RawSE1 = buffer.ReadBytesNext(int64(file.Audio.Header.SE1TrackSize))
+	file.Audio.Data.RawSE2 = buffer.ReadBytesNext(int64(file.Audio.Header.SE2TrackSize))
+	file.Audio.Data.RawSE3 = buffer.ReadBytesNext(int64(file.Audio.Header.SE3TrackSize))
 
-	_, err = buffer.Read(file.Audio.Data.RawBGM)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = buffer.Read(file.Audio.Data.RawSE1)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = buffer.Read(file.Audio.Data.RawSE2)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = buffer.Read(file.Audio.Data.RawSE3)
-	if err != nil {
-		return nil, err
-	}
-
-	currentPosition, err = buffer.Seek(0, io.SeekCurrent)
-	if err != nil {
-		return nil, err
-	}
-
-	if currentPosition == buffer.Size() {
+	if buffer.ByteOffset() == buffer.ByteCapacity() {
 		return file, fmt.Errorf("this ppm file is unsigned. will not play on a dsi")
 	}
-
-	file.Signature = make([]byte, 0x80)
-	_, err = buffer.Read(file.Signature)
-	if err != nil {
-		return nil, err
-	}
+	file.Signature = buffer.ReadBytesNext(0x80)
 
 	//padding
-	_, err = buffer.Read(make([]byte, 0x10))
-	if err != nil {
-		return nil, err
+	buffer.SeekByte(0x10, true)
+
+	if buffer.ByteOffset() < buffer.ByteCapacity() {
+		return nil, errors.New(fmt.Sprintf("unexpected data (%d) after signature", buffer.ByteCapacity() - buffer.ByteOffset()))
 	}
 
-	_, err = buffer.ReadByte()
-	if err == nil {
-		return nil, errors.New("managed to read past expected end of file")
+	for {
+		if file.FramesParsed >= file.FrameCount {
+			break
+		}
 	}
 
 	return file, nil
+}
+
+func (file *PPMFile) ParseFrame(frame uint16, data []byte) {
+	file.Frames[frame] = ReadFrame(crunch.NewBuffer(data))
+	file.FramesParsed++
+}
+
+func (file *PPMFile) ParseFrames(data []byte, offsets []uint32) {
+	perGor := uint16(100)
+	for i := uint16(0); i < uint16(len(offsets)); i+= perGor {
+		go func(i uint16) {
+			for j := uint16(0); j < perGor; j++ {
+				frame := i+j
+				if frame >= uint16(len(offsets)) {
+					break
+				}
+
+				frameOffset := 0x06A0 + 8 + int64(file.FrameOffsetTableSize) + int64(offsets[frame])
+				frameEndset := frameOffset + (int64(file.AnimationDataSize) - int64(offsets[frame]))
+				file.ParseFrame(frame, data[frameOffset:frameEndset])
+			}
+		}(i)
+	}
+
+	for {
+		if file.FramesParsed >= uint16(len(offsets)) {
+			break
+		}
+	}
+
+	for i := uint16(1); i < uint16(len(offsets)); i++ {
+		file.Frames[i].Overwrite(file.Frames[i-1])
+	}
 }
 
 func CreateFile(author *Author, frames []*Frame, audio []byte) (*PPMFile, error) {
@@ -525,7 +366,7 @@ func CreateFile(author *Author, frames []*Frame, audio []byte) (*PPMFile, error)
 	file.Audio.Header.RecordingBGMFrameSpeed = 0
 
 	file.SoundDataSize = uint32(len(audio))
-	file.Thumbnail = *new([1536]byte)
+	file.Thumbnail = make([]byte, 1536)
 
 	return file, nil
 }
@@ -554,15 +395,15 @@ func (f *PPMFile) Save(path string) error {
 	binary.Write(file, binary.LittleEndian, f.ThumbnailFrameIndex)
 
 	goRootAuthor := []byte(f.RootAuthor.Name)
-	fmt.Println(string(goRootAuthor))
+	//fmt.Println(string(goRootAuthor))
 
 	goParentAuthor := []byte(f.ParentAuthor.Name)
 
 	goCurrentAuthor := []byte(f.CurrentAuthor.Name)
 
-	rootAuthor, _ := syscall.UTF16FromString(string(goRootAuthor))
-	parentAuthor, _ := syscall.UTF16FromString(string(goParentAuthor))
-	currentAuthor, _ := syscall.UTF16FromString(string(goCurrentAuthor))
+	rootAuthor := utils.WriteUTF16String(string(goRootAuthor))
+	parentAuthor := utils.WriteUTF16String(string(goParentAuthor))
+	currentAuthor := utils.WriteUTF16String(string(goCurrentAuthor))
 
 	for len(rootAuthor) != 11 {
 		rootAuthor = append(rootAuthor, '\000')

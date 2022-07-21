@@ -1,20 +1,36 @@
 package utils
 
 import (
-	"encoding/binary"
+	"bytes"
 	"errors"
 	"io"
-	"syscall"
+	"io/ioutil"
+
+	"golang.org/x/text/encoding/unicode"
+	"golang.org/x/text/transform"
 )
 
-func ReadWChars(reader io.Reader, count int) (string, error) {
-	buffer := make([]uint16, count)
-	err := binary.Read(reader, binary.LittleEndian, &buffer)
+func ReadUTF16String(data []byte) string {
+	win16le := unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM)
+	utf16bom := unicode.BOMOverride(win16le.NewDecoder())
+	unicodeReader := transform.NewReader(bytes.NewReader(data), utf16bom)
+	decoded, err := ioutil.ReadAll(unicodeReader)
 	if err != nil {
-		return "", err
+		panic(err)
 	}
 
-	return syscall.UTF16ToString(buffer), nil
+	return string(decoded)
+}
+func WriteUTF16String(data string) []byte {
+	win16le := unicode.UTF16(unicode.LittleEndian, unicode.IgnoreBOM)
+	utf16bom := unicode.BOMOverride(win16le.NewEncoder())
+	unicodeWriter := transform.NewReader(bytes.NewReader([]byte(data)), utf16bom)
+	encoded, err := ioutil.ReadAll(unicodeWriter)
+	if err != nil {
+		panic(err)
+	}
+
+	return encoded
 }
 
 func IndexOf[T comparable](array []T, value T) int {

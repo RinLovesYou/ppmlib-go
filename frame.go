@@ -1,8 +1,7 @@
 package ppmlib
 
 import (
-	"bytes"
-	"encoding/binary"
+	crunch "github.com/superwhiskers/crunch/v3"
 )
 
 type Frame struct {
@@ -26,41 +25,22 @@ func NewFrame() *Frame {
 	}
 }
 
-func ReadFrame(reader *bytes.Reader) (*Frame, error) {
+func ReadFrame(buffer *crunch.Buffer) *Frame {
 	frame := NewFrame()
-	var err error
 
-	frame.FirstByteHeader, err = reader.ReadByte()
-	if err != nil {
-		return nil, err
-	}
+	frame.FirstByteHeader = buffer.ReadByteNext()
 
 	if frame.FirstByteHeader&96 != 0 {
-		err = binary.Read(reader, binary.LittleEndian, &frame.translateX)
-		if err != nil {
-			return nil, err
-		}
-
-		err = binary.Read(reader, binary.LittleEndian, &frame.translateY)
-		if err != nil {
-			return nil, err
-		}
-
+		frame.translateX = int8(buffer.ReadByteNext())
+		frame.translateY = int8(buffer.ReadByteNext())
 	}
 
 	frame.PaperColor = PaperColor(frame.FirstByteHeader % 2)
 	frame.Layer1.PenColor = PenColor((frame.FirstByteHeader >> 1) & 3)
 	frame.Layer2.PenColor = PenColor((frame.FirstByteHeader >> 3) & 3)
 
-	_, err = reader.Read(frame.Layer1.linesEncoding)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = reader.Read(frame.Layer2.linesEncoding)
-	if err != nil {
-		return nil, err
-	}
+	frame.Layer1.linesEncoding = buffer.ReadBytesNext(48)
+	frame.Layer2.linesEncoding = buffer.ReadBytesNext(48)
 
 	//this is about to get really disgusting. I love line encoding. bare with me.
 
@@ -73,34 +53,16 @@ func ReadFrame(reader *bytes.Reader) (*Frame, error) {
 				frame.Layer1.layerData[yy+x] = 0
 			}
 
-			b1, err := reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
-
-			b2, err := reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
-
-			b3, err := reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
-
-			b4, err := reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
+			b1 := buffer.ReadByteNext()
+			b2 := buffer.ReadByteNext()
+			b3 := buffer.ReadByteNext()
+			b4 := buffer.ReadByteNext()
 
 			bytes := uint32(b1)<<24 + uint32(b2)<<16 + uint32(b3)<<8 + uint32(b4)
 
 			for bytes != 0 {
 				if bytes&0x80000000 != 0 {
-					frame.Layer1.layerData[yy], err = reader.ReadByte()
-					if err != nil {
-						return nil, err
-					}
+					frame.Layer1.layerData[yy] = buffer.ReadByteNext()
 				}
 				bytes <<= 1
 				yy++
@@ -110,34 +72,16 @@ func ReadFrame(reader *bytes.Reader) (*Frame, error) {
 				frame.Layer1.layerData[yy+x] = 0xFF
 			}
 
-			b1, err := reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
-
-			b2, err := reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
-
-			b3, err := reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
-
-			b4, err := reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
+			b1 := buffer.ReadByteNext()
+			b2 := buffer.ReadByteNext()
+			b3 := buffer.ReadByteNext()
+			b4 := buffer.ReadByteNext()
 
 			bytes := uint32(b1)<<24 + uint32(b2)<<16 + uint32(b3)<<8 + uint32(b4)
 
 			for bytes != 0 {
 				if bytes&0x80000000 != 0 {
-					frame.Layer1.layerData[yy], err = reader.ReadByte()
-					if err != nil {
-						return nil, err
-					}
+					frame.Layer1.layerData[yy] = buffer.ReadByteNext()
 				}
 				bytes <<= 1
 				yy++
@@ -145,10 +89,7 @@ func ReadFrame(reader *bytes.Reader) (*Frame, error) {
 
 		case LineEncodingRaw:
 			for x := 0; x < 32; x++ {
-				frame.Layer1.layerData[yy+x], err = reader.ReadByte()
-				if err != nil {
-					return nil, err
-				}
+				frame.Layer1.layerData[yy+x] = buffer.ReadByteNext()
 			}
 		}
 	}
@@ -162,34 +103,16 @@ func ReadFrame(reader *bytes.Reader) (*Frame, error) {
 				frame.Layer2.layerData[yy+x] = 0
 			}
 
-			b1, err := reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
-
-			b2, err := reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
-
-			b3, err := reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
-
-			b4, err := reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
+			b1 := buffer.ReadByteNext()
+			b2 := buffer.ReadByteNext()
+			b3 := buffer.ReadByteNext()
+			b4 := buffer.ReadByteNext()
 
 			bytes := uint32(b1)<<24 + uint32(b2)<<16 + uint32(b3)<<8 + uint32(b4)
 
 			for bytes != 0 {
 				if bytes&0x80000000 != 0 {
-					frame.Layer2.layerData[yy], err = reader.ReadByte()
-					if err != nil {
-						return nil, err
-					}
+					frame.Layer2.layerData[yy] = buffer.ReadByteNext()
 				}
 				bytes <<= 1
 				yy++
@@ -199,34 +122,16 @@ func ReadFrame(reader *bytes.Reader) (*Frame, error) {
 				frame.Layer2.layerData[yy+x] = 0xFF
 			}
 
-			b1, err := reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
-
-			b2, err := reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
-
-			b3, err := reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
-
-			b4, err := reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
+			b1 := buffer.ReadByteNext()
+			b2 := buffer.ReadByteNext()
+			b3 := buffer.ReadByteNext()
+			b4 := buffer.ReadByteNext()
 
 			bytes := uint32(b1)<<24 + uint32(b2)<<16 + uint32(b3)<<8 + uint32(b4)
 
 			for bytes != 0 {
 				if bytes&0x80000000 != 0 {
-					frame.Layer2.layerData[yy], err = reader.ReadByte()
-					if err != nil {
-						return nil, err
-					}
+					frame.Layer2.layerData[yy] = buffer.ReadByteNext()
 				}
 				bytes <<= 1
 				yy++
@@ -234,15 +139,12 @@ func ReadFrame(reader *bytes.Reader) (*Frame, error) {
 
 		case LineEncodingRaw:
 			for x := 0; x < 32; x++ {
-				frame.Layer2.layerData[yy+x], err = reader.ReadByte()
-				if err != nil {
-					return nil, err
-				}
+				frame.Layer2.layerData[yy+x] = buffer.ReadByteNext()
 			}
 		}
 	}
 
-	return frame, nil
+	return frame
 }
 
 func (f *Frame) Overwrite(other *Frame) {

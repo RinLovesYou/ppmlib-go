@@ -8,69 +8,35 @@ import (
 	"time"
 
 	"github.com/RinLovesYou/ppmlib-go"
-	ffmpeg_go "github.com/u2takey/ffmpeg-go"
+	"github.com/Clinet/ffgoconv"
 )
 
-// func main() {
-// 	ppm, err := ppmlib.ReadFile("bokeh.ppm")
-// 	if err != nil {
-// 		panic(err)
-// 	}
-
-// 	images := make([]*image.Paletted, ppm.FrameCount)
-// 	for i := uint16(0); i < ppm.FrameCount; i++ {
-// 		images[i] = ppm.Frames[i].GetImage()
-// 	}
-
-// 	buf, err := os.Create("bokeh.gif")
-// 	if err != nil {
-// 		panic(err)
-// 	}
-
-// 	timings := make([]int, ppm.FrameCount)
-
-// 	for i := uint16(0); i < ppm.FrameCount; i++ {
-// 		timings[i] = int(ppm.Framerate / 10000)
-// 	}
-
-// 	gif.EncodeAll(buf, &gif.GIF{
-// 		Image: images,
-// 		Delay: timings,
-// 	})
-
-// 	buf.Close()
-
-// 	video, err := os.Open("bokeh.gif")
-// 	if err != nil {
-// 		panic(err)
-// 	}
-
-// 	audio, err := os.Create("bokeh.wav")
-// 	if err != nil {
-// 		panic(err)
-// 	}
-
-// 	ppm.Audio.Export(audio, ppm, 32768)
-
-// 	audio.Close()
-// 	ffmpeg_go.Input("pipe:0", ffmpeg_go.KwArgs{"format": "gif_pipe"}).WithInput(video).Output("bokeh.mp4").OverWriteOutput().ErrorToStdOut().Run()
-// }
-
 func main() {
+	if len(os.Args) < 2 {
+		panic("you must specify a flipnote! exclude the .ppm for now or it'll think .ppm.ppm and .ppm.mp4")
+	}
 
-	now := time.Now()
-
-	name := "output"
+	name := os.Args[1]
 	namePPM := fmt.Sprintf("%s.ppm", name)
 	nameGIF := fmt.Sprintf("%s.gif", name)
-	nameMP4 := fmt.Sprintf("%s.mp4", name)
 	nameWAV := fmt.Sprintf("%s.wav", name)
+	nameMP4 := fmt.Sprintf("%s.mp4", name)
 
+	os.Remove(nameGIF)
+	os.Remove(nameWAV)
+	os.Remove(nameMP4)
+
+	fmt.Println("Starting...")
+	timeStart := time.Now()
+
+	timePPM := time.Now()
 	ppm, err := ppmlib.ReadFile(namePPM)
 	if err != nil {
 		panic(err)
 	}
+	fmt.Printf("PPM: Parsed %s in %dms!\n", name, time.Since(timePPM).Milliseconds())
 
+	timeGIF := time.Now()
 	images := make([]*image.Paletted, ppm.FrameCount)
 	for i := uint16(0); i < ppm.FrameCount; i++ {
 		images[i] = ppm.Frames[i].GetImage()
@@ -80,55 +46,50 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
 	defer gifFile.Close()
 
 	timings := make([]int, ppm.FrameCount)
-
-	for i := uint16(0); i < ppm.FrameCount; i++ {
-
-	}
 
 	gif.EncodeAll(gifFile, &gif.GIF{
 		Image: images,
 		Delay: timings,
 	})
+	fmt.Printf("GIF: Encoded %s in %dms!\n", name, time.Since(timeGIF).Milliseconds())
 
+	timeWAV := time.Now()
 	audioFile, err := os.Create(nameWAV)
 	if err != nil {
 		panic(err)
 	}
-
 	defer audioFile.Close()
 
 	ppm.Audio.Export(audioFile, ppm, 32768)
+	fmt.Printf("WAV: Encoded %s in %dms!\n", name, time.Since(timeWAV).Milliseconds())
 
-	var files_stream []*ffmpeg_go.Stream
-
-	files_stream = append(files_stream, ffmpeg_go.Input(nameGIF, ffmpeg_go.KwArgs{"r": fmt.Sprintf("%.1f", ppm.Framerate)}).Video())
-	files_stream = append(files_stream, ffmpeg_go.Input(nameWAV).Audio())
-
-	err = ffmpeg_go.Concat(files_stream, ffmpeg_go.KwArgs{"v": 1, "a": 1}).
-		Output(nameMP4, ffmpeg_go.KwArgs{
-			"pix_fmt": "yuv420p",
-			"c:v":     "libx264",
-			"c:a":     "aac",
-		}).
-		OverWriteOutput().
-		Run()
-
+	timeMP4 := time.Now()
+	ffmpeg, err := ffgoconv.NewFFmpeg(name, []string{"-hide_banner", "-stats",
+		"-hwaccel", "auto",
+		"-i", nameGIF, "-r", fmt.Sprintf("%.1f", ppm.Framerate),
+		"-i", nameWAV,
+		nameMP4, "-pix_fmt", "yuv420p", "-c:v", "libx264", "-c:a", "aac",
+		"-threads", "0",
+	})
 	if err != nil {
 		panic(err)
 	}
 
-	audioFile.Close()
-	gifFile.Close()
+	for {
+		if !ffmpeg.IsRunning() {
+			break
+		}
+		time.Sleep(time.Millisecond * 1)
+	}
+	if ffmpeg.Err() != nil {
+		panic(ffmpeg.Err())
+	}
+	fmt.Printf("MP4: Encoded %s in %dms!\n", name, time.Since(timeMP4).Milliseconds())
 
-	os.Remove(nameGIF)
-	os.Remove(nameWAV)
+	fmt.Printf("Parsing and encoding %s took a total of %dms!\n", name, time.Since(timeStart).Milliseconds())
 
-	elapsed := time.Since(now)
-	fmt.Printf("parsing & encoding %s took %.1fs!\n", name, elapsed.Seconds())
-
-	ppm.Save("copy.ppm")
+	//ppm.Save("copy.ppm")
 }
