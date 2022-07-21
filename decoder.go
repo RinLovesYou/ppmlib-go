@@ -38,7 +38,7 @@ var stepTable = []int{
 func (d *AdpcmDecoder) GetAudioMasterPcm(dstFreq int) ([]int16, error) {
 	var err error
 
-	duration := d.getDuration()
+	duration := getTime(float32(d.flipnote.FrameCount), float32(d.flipnote.Framerate))
 
 	dstSize := int(duration*float32(dstFreq)) + 1
 	master := make([]int16, dstSize+1)
@@ -232,6 +232,6 @@ func (d *AdpcmDecoder) decode(track PPMAudioTrack) ([]int16, error) {
 	return dst, nil
 }
 
-func (d *AdpcmDecoder) getDuration() float32 {
-	return (float32(d.flipnote.FrameCount*100) * float32(1/d.flipnote.Framerate)) / 100
+func getTime(fc, fr float32) float32 {
+	return ((fc * 100) * (1 / fr)) / 100
 }
