@@ -204,22 +204,32 @@ func Parse(data []byte) (*PPMFile, error) {
 		return nil, errors.New(fmt.Sprintf("unexpected data (%d) after signature", buffer.ByteCapacity()-buffer.ByteOffset()))
 	}
 
+	//Block until all frames have been processed
 	for {
-		if file.FramesParsed >= file.FrameCount {
+		if file.FramesParsed >= uint16(len(file.Frames)-1) {
 			break
 		}
+
+		frames := make([]uint16, 0)
+		for i := uint16(0); i < uint16(len(file.Frames)); i++ {
+			if file.Frames[i] == nil {
+				frames = append(frames, i+1)
+			}
+		}
+		if len(frames) == 0 {
+			break
+		}
+	}
+
+	for i := uint16(1); i < uint16(len(file.Frames)); i++ {
+		go file.Frames[i].Overwrite(file.Frames[i-1])
 	}
 
 	return file, nil
 }
 
-func (file *PPMFile) ParseFrame(frame uint16, data []byte) {
-	file.Frames[frame] = ReadFrame(crunch.NewBuffer(data))
-	file.FramesParsed++
-}
-
 func (file *PPMFile) ParseFrames(data []byte, offsets []uint32) {
-	perGor := uint16(100)
+	perGor := uint16(25)
 	for i := uint16(0); i < uint16(len(offsets)); i += perGor {
 		go func(i uint16) {
 			for j := uint16(0); j < perGor; j++ {
@@ -230,20 +240,10 @@ func (file *PPMFile) ParseFrames(data []byte, offsets []uint32) {
 
 				frameOffset := 0x06A0 + 8 + int64(file.FrameOffsetTableSize) + int64(offsets[frame])
 				frameEndset := frameOffset + (int64(file.AnimationDataSize) - int64(offsets[frame]))
-				file.ParseFrame(frame, data[frameOffset:frameEndset])
+				file.Frames[frame] = ReadFrame(crunch.NewBuffer(data[frameOffset:frameEndset]))
+				file.FramesParsed++
 			}
 		}(i)
-		time.Sleep(time.Millisecond * 3)
-	}
-
-	for {
-		if file.FramesParsed >= uint16(len(offsets)) {
-			break
-		}
-	}
-
-	for i := uint16(1); i < uint16(len(offsets)); i++ {
-		file.Frames[i].Overwrite(file.Frames[i-1])
 	}
 }
 
